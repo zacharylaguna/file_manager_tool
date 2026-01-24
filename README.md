@@ -19,7 +19,13 @@ A Python GUI application for bulk file operations with regex filtering.
 
 ## Usage
 
-Run the application:
+### Option 1: Double-Click to Run (Easiest)
+
+**Windows:**
+- Double-click `run_file_manager.pyw` (no console window)
+- OR double-click `run_file_manager.bat` (shows console window)
+
+### Option 2: Command Line
 
 ```bash
 python file_manager.py
