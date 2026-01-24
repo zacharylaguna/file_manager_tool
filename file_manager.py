@@ -20,6 +20,7 @@ class FileManagerApp:
         self.root.minsize(800, 600)
         
         self.current_folder = None
+        self.folder_history = []  # Stack for back navigation
         self.all_items = []  # Now includes both files and folders
         self.filtered_items = []
         self.selected_items = set()
@@ -58,6 +59,15 @@ class FileManagerApp:
     def _create_folder_section(self, parent):
         folder_frame = ttk.LabelFrame(parent, text="Folder", padding="5")
         folder_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Navigation buttons
+        self.back_btn = ttk.Button(folder_frame, text="← Back", command=self._go_back, width=8)
+        self.back_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.back_btn.config(state='disabled')
+        
+        self.up_btn = ttk.Button(folder_frame, text="↑ Up", command=self._go_up, width=6)
+        self.up_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self.up_btn.config(state='disabled')
         
         self.folder_path_var = tk.StringVar()
         folder_entry = ttk.Entry(folder_frame, textvariable=self.folder_path_var, state='readonly')
@@ -198,9 +208,8 @@ class FileManagerApp:
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="Select Folder")
         if folder:
-            self.current_folder = folder
-            self.folder_path_var.set(folder)
-            self._refresh_files()
+            self.folder_history.clear()  # Clear history when browsing to new location
+            self._navigate_to_folder(folder, add_to_history=False)
             
     def _refresh_files(self):
         if not self.current_folder:
@@ -370,23 +379,74 @@ class FileManagerApp:
                 self.file_tree.selection_add(item_id)
         self._on_selection_change(None)
         
-    def _preview_file(self, event):
+    def _go_back(self):
+        """Navigate to the previous folder in history."""
+        if self.folder_history:
+            prev_folder = self.folder_history.pop()
+            self._navigate_to_folder(prev_folder, add_to_history=False)
+            
+    def _go_up(self):
+        """Navigate to the parent folder."""
+        if self.current_folder:
+            parent = os.path.dirname(self.current_folder)
+            if parent and parent != self.current_folder:
+                self._navigate_to_folder(parent, add_to_history=True)
+                
+    def _navigate_to_folder(self, folder_path, add_to_history=True):
+        """Navigate to a specific folder."""
+        if add_to_history and self.current_folder:
+            self.folder_history.append(self.current_folder)
+            
+        self.current_folder = folder_path
+        self.folder_path_var.set(folder_path)
+        self._refresh_files()
+        self._update_nav_buttons()
+        
+    def _update_nav_buttons(self):
+        """Update the state of navigation buttons."""
+        # Back button
+        if self.folder_history:
+            self.back_btn.config(state='normal')
+        else:
+            self.back_btn.config(state='disabled')
+            
+        # Up button
+        if self.current_folder:
+            parent = os.path.dirname(self.current_folder)
+            if parent and parent != self.current_folder:
+                self.up_btn.config(state='normal')
+            else:
+                self.up_btn.config(state='disabled')
+        else:
+            self.up_btn.config(state='disabled')
+            
+    def _on_double_click(self, event):
+        """Handle double-click: enter folder or preview file."""
         selection = self.file_tree.selection()
         if not selection:
             return
             
         item_id = selection[0]
         values = self.file_tree.item(item_id, 'values')
-        file_path = values[4]  # path is index 4 now
+        item_path = values[4]  # path is index 4
         
-        # Check if it's a folder
+        # Check if it's a folder - navigate into it
         if values[0] == "📁":
-            messagebox.showinfo("Folder", f"This is a folder: {values[1]}")
+            self._navigate_to_folder(item_path, add_to_history=True)
             return
         
+        # Otherwise preview the file
+        self._preview_file_content(item_path, values[1])
+        
+    def _preview_file(self, event):
+        """Legacy handler - redirects to _on_double_click."""
+        self._on_double_click(event)
+        
+    def _preview_file_content(self, file_path, file_name):
+        """Open a preview window for a file."""
         # Open preview window
         preview_win = tk.Toplevel(self.root)
-        preview_win.title(f"Preview: {values[0]}")
+        preview_win.title(f"Preview: {file_name}")
         preview_win.geometry("600x400")
         
         text_widget = tk.Text(preview_win, wrap=tk.WORD)
