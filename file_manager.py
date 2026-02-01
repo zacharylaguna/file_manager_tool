@@ -92,10 +92,14 @@ class FileManagerApp:
     def _setup_styles(self):
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure('TButton', padding=6)
-        style.configure('Action.TButton', padding=10)
+        style.configure('TButton', padding=6, font=('Segoe UI', 9))
+        style.configure('Action.TButton', padding=10, font=('Segoe UI', 9))
         style.configure('Treeview', rowheight=25)
         style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+        
+        # Breadcrumb button styles
+        style.configure('Breadcrumb.TButton', padding=(8, 4), font=('Segoe UI', 9))
+        style.configure('Breadcrumb.Last.TButton', padding=(8, 4), font=('Segoe UI', 9, 'bold'))
         
     def _create_ui(self):
         # Main container
@@ -118,27 +122,57 @@ class FileManagerApp:
         self._create_status_bar(main_frame)
         
     def _create_folder_section(self, parent):
-        folder_frame = ttk.LabelFrame(parent, text="Folder", padding="5")
+        folder_frame = ttk.LabelFrame(parent, text="Navigation", padding="10")
         folder_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Navigation buttons
-        self.back_btn = ttk.Button(folder_frame, text="← Back", command=self._go_back, width=8)
-        self.back_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # Top row: Navigation controls
+        nav_controls = ttk.Frame(folder_frame)
+        nav_controls.pack(fill=tk.X, pady=(0, 8))
+        
+        # Left side: Navigation buttons
+        nav_buttons = ttk.Frame(nav_controls)
+        nav_buttons.pack(side=tk.LEFT)
+        
+        self.back_btn = ttk.Button(nav_buttons, text="◀ Back", command=self._go_back, width=9)
+        self.back_btn.pack(side=tk.LEFT, padx=(0, 3))
         self.back_btn.config(state='disabled')
         
-        self.up_btn = ttk.Button(folder_frame, text="↑ Up", command=self._go_up, width=6)
-        self.up_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self.up_btn = ttk.Button(nav_buttons, text="▲ Up", command=self._go_up, width=7)
+        self.up_btn.pack(side=tk.LEFT, padx=(0, 3))
         self.up_btn.config(state='disabled')
         
-        self.folder_path_var = tk.StringVar()
-        folder_entry = ttk.Entry(folder_frame, textvariable=self.folder_path_var, state='readonly')
-        folder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ttk.Separator(nav_controls, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=8)
         
-        browse_btn = ttk.Button(folder_frame, text="Browse...", command=self._browse_folder)
-        browse_btn.pack(side=tk.LEFT)
+        # Right side: Action buttons
+        action_buttons = ttk.Frame(nav_controls)
+        action_buttons.pack(side=tk.LEFT)
         
-        refresh_btn = ttk.Button(folder_frame, text="Refresh", command=self._refresh_files)
-        refresh_btn.pack(side=tk.LEFT, padx=(5, 0))
+        browse_btn = ttk.Button(action_buttons, text="📂 Browse...", command=self._browse_folder, width=12)
+        browse_btn.pack(side=tk.LEFT, padx=(0, 3))
+        
+        refresh_btn = ttk.Button(action_buttons, text="🔄 Refresh", command=self._refresh_files, width=10)
+        refresh_btn.pack(side=tk.LEFT)
+        
+        # Bottom row: Clickable breadcrumb navigation
+        breadcrumb_container = ttk.Frame(folder_frame)
+        breadcrumb_container.pack(fill=tk.X)
+        
+        ttk.Label(breadcrumb_container, text="Path:", font=('Segoe UI', 9, 'bold')).pack(side=tk.LEFT, padx=(0, 8))
+        
+        # Frame to hold breadcrumb buttons with light background
+        breadcrumb_wrapper = ttk.Frame(breadcrumb_container, relief=tk.SUNKEN, borderwidth=1)
+        breadcrumb_wrapper.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Scrollable frame for breadcrumbs
+        self.breadcrumb_canvas = tk.Canvas(breadcrumb_wrapper, height=28, bg='white', 
+                                          highlightthickness=0, bd=0)
+        self.breadcrumb_canvas.pack(fill=tk.BOTH, expand=True)
+        
+        self.breadcrumb_frame = ttk.Frame(self.breadcrumb_canvas)
+        self.breadcrumb_canvas.create_window((2, 2), window=self.breadcrumb_frame, anchor='nw')
+        
+        # Bind canvas resize
+        self.breadcrumb_frame.bind('<Configure>', lambda e: self.breadcrumb_canvas.configure(scrollregion=self.breadcrumb_canvas.bbox('all')))
         
     def _create_search_section(self, parent):
         search_frame = ttk.LabelFrame(parent, text="Search / Filter", padding="5")
@@ -189,7 +223,11 @@ class FileManagerApp:
         
         ttk.Button(select_frame, text="Select All", command=self._select_all).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(select_frame, text="Deselect All", command=self._deselect_all).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(select_frame, text="Invert Selection", command=self._invert_selection).pack(side=tk.LEFT)
+        ttk.Button(select_frame, text="Invert Selection", command=self._invert_selection).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Create new items buttons
+        ttk.Button(select_frame, text="📁 New Folder", command=self._create_new_folder).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(select_frame, text="📄 New File", command=self._create_new_file).pack(side=tk.LEFT)
         
         self.selection_label = ttk.Label(select_frame, text="Selected: 0 items")
         self.selection_label.pack(side=tk.RIGHT)
@@ -222,6 +260,7 @@ class FileManagerApp:
         # Bind selection event
         self.file_tree.bind('<<TreeviewSelect>>', self._on_selection_change)
         self.file_tree.bind('<Double-1>', self._preview_file)
+        self.file_tree.bind('<Button-3>', self._show_context_menu)  # Right-click
         
         # Sort state
         self.sort_column = 'name'
@@ -256,7 +295,13 @@ class FileManagerApp:
         ttk.Separator(action_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         
         copy_btn = ttk.Button(action_frame, text="📋 Copy To...", command=self._bulk_copy)
-        copy_btn.pack(side=tk.LEFT)
+        copy_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Move section
+        ttk.Separator(action_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+        
+        move_btn = ttk.Button(action_frame, text="✂️ Move To...", command=self._bulk_move)
+        move_btn.pack(side=tk.LEFT)
         
     def _create_status_bar(self, parent):
         status_frame = ttk.Frame(parent)
@@ -266,6 +311,188 @@ class FileManagerApp:
         status_label = ttk.Label(status_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_label.pack(fill=tk.X)
         
+    def _show_context_menu(self, event):
+        """Show right-click context menu."""
+        # Select the item under cursor if not already selected
+        item_id = self.file_tree.identify_row(event.y)
+        if not item_id:
+            return
+        
+        # If right-clicked item is not in selection, select only it
+        if item_id not in self.file_tree.selection():
+            self.file_tree.selection_set(item_id)
+        
+        # Get info about clicked item
+        values = self.file_tree.item(item_id, 'values')
+        is_folder = values[0] == "📁"
+        item_path = values[4]
+        
+        # Create context menu
+        context_menu = tk.Menu(self.root, tearoff=0)
+        
+        # Single item actions
+        if len(self.file_tree.selection()) == 1:
+            if is_folder:
+                context_menu.add_command(label="Open Folder", command=lambda: self._navigate_to_folder(item_path, add_to_history=True))
+            else:
+                context_menu.add_command(label="Preview", command=lambda: self._preview_file_content(item_path, values[1]))
+            
+            context_menu.add_command(label="Open in File Explorer", command=lambda: self._open_in_explorer(item_path))
+            context_menu.add_separator()
+        
+        # Multi-selection actions
+        selection_count = len(self.file_tree.selection())
+        context_menu.add_command(label=f"Copy ({selection_count} items)", command=self._bulk_copy)
+        context_menu.add_command(label=f"Rename ({selection_count} items)", command=self._bulk_rename)
+        context_menu.add_separator()
+        context_menu.add_command(label=f"Delete ({selection_count} items)", command=self._bulk_delete)
+        
+        # Create new items (always available)
+        context_menu.add_separator()
+        context_menu.add_command(label="New Folder...", command=self._create_new_folder)
+        context_menu.add_command(label="New File...", command=self._create_new_file)
+        
+        # Show menu
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+    
+    def _open_in_explorer(self, path):
+        """Open the file or folder in the system file explorer."""
+        try:
+            if os.path.isdir(path):
+                os.startfile(path)
+            else:
+                # Open parent folder and select the file
+                os.startfile(os.path.dirname(path))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open in explorer: {str(e)}")
+    
+    def _create_new_folder(self):
+        """Create a new folder in the current directory."""
+        if not self.current_folder:
+            messagebox.showwarning("No Folder", "Please open a folder first.")
+            return
+        
+        # Create dialog for folder name
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Create New Folder")
+        dialog.geometry("400x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (150 // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="Folder name:").pack(anchor=tk.W, pady=(0, 5))
+        
+        name_var = tk.StringVar(value="New Folder")
+        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=50)
+        name_entry.pack(fill=tk.X, pady=(0, 15))
+        name_entry.select_range(0, tk.END)
+        name_entry.focus()
+        
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack()
+        
+        def create():
+            folder_name = name_var.get().strip()
+            if not folder_name:
+                messagebox.showwarning("Invalid Name", "Please enter a folder name.")
+                return
+            
+            folder_path = os.path.join(self.current_folder, folder_name)
+            
+            if os.path.exists(folder_path):
+                messagebox.showerror("Error", f"A folder named '{folder_name}' already exists.")
+                return
+            
+            try:
+                os.makedirs(folder_path)
+                dialog.destroy()
+                self._refresh_files()
+                self.status_var.set(f"Created folder: {folder_name}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create folder: {str(e)}")
+        
+        ttk.Button(button_frame, text="Create", command=create, width=10).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy, width=10).pack(side=tk.LEFT)
+        
+        # Bind Enter key
+        name_entry.bind('<Return>', lambda e: create())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+    
+    def _create_new_file(self):
+        """Create a new file in the current directory."""
+        if not self.current_folder:
+            messagebox.showwarning("No Folder", "Please open a folder first.")
+            return
+        
+        # Create dialog for file name
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Create New File")
+        dialog.geometry("400x150")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (150 // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(main_frame, text="File name:").pack(anchor=tk.W, pady=(0, 5))
+        
+        name_var = tk.StringVar(value="new_file.txt")
+        name_entry = ttk.Entry(main_frame, textvariable=name_var, width=50)
+        name_entry.pack(fill=tk.X, pady=(0, 15))
+        name_entry.select_range(0, tk.END)
+        name_entry.focus()
+        
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack()
+        
+        def create():
+            file_name = name_var.get().strip()
+            if not file_name:
+                messagebox.showwarning("Invalid Name", "Please enter a file name.")
+                return
+            
+            file_path = os.path.join(self.current_folder, file_name)
+            
+            if os.path.exists(file_path):
+                messagebox.showerror("Error", f"A file named '{file_name}' already exists.")
+                return
+            
+            try:
+                # Create empty file
+                with open(file_path, 'w') as f:
+                    pass
+                dialog.destroy()
+                self._refresh_files()
+                self.status_var.set(f"Created file: {file_name}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create file: {str(e)}")
+        
+        ttk.Button(button_frame, text="Create", command=create, width=10).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy, width=10).pack(side=tk.LEFT)
+        
+        # Bind Enter key
+        name_entry.bind('<Return>', lambda e: create())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+    
     def _browse_folder(self):
         folder = filedialog.askdirectory(title="Select Folder")
         if folder:
@@ -471,10 +698,124 @@ class FileManagerApp:
             self.folder_history.append(self.current_folder)
             
         self.current_folder = folder_path
-        self.folder_path_var.set(folder_path)
         self._refresh_files()
         self._update_nav_buttons()
+        self._update_breadcrumbs()
         
+    def _update_breadcrumbs(self):
+        """Update the breadcrumb navigation."""
+        # Clear existing breadcrumbs
+        for widget in self.breadcrumb_frame.winfo_children():
+            widget.destroy()
+        
+        if not self.current_folder:
+            return
+        
+        # Split path into parts
+        path_parts = []
+        current = self.current_folder
+        
+        while current:
+            parent = os.path.dirname(current)
+            if parent == current:  # Root reached
+                path_parts.append(current)
+                break
+            path_parts.append(os.path.basename(current))
+            current = parent
+        
+        path_parts.reverse()
+        
+        # Create breadcrumb buttons
+        accumulated_path = ""
+        for i, part in enumerate(path_parts):
+            if i == 0 and len(part) <= 3:  # Drive letter on Windows (e.g., C:\)
+                accumulated_path = part
+            elif i == 0:
+                accumulated_path = part
+            else:
+                accumulated_path = os.path.join(accumulated_path, part)
+            
+            # Create container for this breadcrumb segment
+            segment_frame = tk.Frame(self.breadcrumb_frame, bg='white')
+            segment_frame.pack(side=tk.LEFT)
+            
+            # Create clickable label/button for this part
+            is_last = (i == len(path_parts) - 1)
+            
+            if is_last:
+                # Last item - show as bold label (not clickable)
+                lbl = ttk.Label(segment_frame, text=part if part else "/", 
+                              font=('Segoe UI', 9, 'bold'))
+                lbl.pack(side=tk.LEFT, padx=2)
+            else:
+                # Clickable link-style label
+                lbl = tk.Label(segment_frame, text=part if part else "/", 
+                             fg='#0066cc', cursor='hand2', font=('Segoe UI', 9),
+                             bg='white')
+                lbl.pack(side=tk.LEFT, padx=2)
+                
+                # Bind click and hover events
+                path_to_nav = accumulated_path
+                lbl.bind('<Button-1>', lambda e, p=path_to_nav: self._navigate_to_folder(p, add_to_history=True))
+                lbl.bind('<Enter>', lambda e, l=lbl: l.config(fg='#0052a3', font=('Segoe UI', 9, 'underline')))
+                lbl.bind('<Leave>', lambda e, l=lbl: l.config(fg='#0066cc', font=('Segoe UI', 9)))
+            
+            # Add dropdown arrow button to show child folders
+            dropdown_btn = tk.Label(segment_frame, text="▼", fg='#666666', cursor='hand2', 
+                                   font=('Segoe UI', 7), bg='white', padx=2)
+            dropdown_btn.pack(side=tk.LEFT)
+            
+            # Bind dropdown events
+            path_for_dropdown = accumulated_path
+            dropdown_btn.bind('<Button-1>', lambda e, p=path_for_dropdown: self._show_child_folders_menu(e, p))
+            dropdown_btn.bind('<Enter>', lambda e, b=dropdown_btn: b.config(fg='#0066cc'))
+            dropdown_btn.bind('<Leave>', lambda e, b=dropdown_btn: b.config(fg='#666666'))
+            
+            # Add separator (except for last item)
+            if i < len(path_parts) - 1:
+                sep = ttk.Label(self.breadcrumb_frame, text="›", font=('Segoe UI', 10))
+                sep.pack(side=tk.LEFT, padx=2)
+        
+    def _show_child_folders_menu(self, event, parent_path):
+        """Show a dropdown menu with child folders of the given path."""
+        try:
+            # Get list of subdirectories
+            items = os.listdir(parent_path)
+            subdirs = []
+            for item in items:
+                item_path = os.path.join(parent_path, item)
+                if os.path.isdir(item_path):
+                    subdirs.append((item, item_path))
+            
+            # Sort alphabetically
+            subdirs.sort(key=lambda x: x[0].lower())
+            
+            # Create popup menu
+            menu = tk.Menu(self.root, tearoff=0)
+            
+            if not subdirs:
+                # No subdirectories - show message
+                menu.add_command(label="(No folders)", state='disabled')
+            else:
+                # Limit to first 20 folders to avoid huge menus
+                for name, path in subdirs[:20]:
+                    menu.add_command(label=name, command=lambda p=path: self._navigate_to_folder(p, add_to_history=True))
+                
+                if len(subdirs) > 20:
+                    menu.add_separator()
+                    menu.add_command(label=f"... and {len(subdirs) - 20} more", state='disabled')
+            
+            # Show menu at click position
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+                
+        except PermissionError:
+            messagebox.showwarning("Access Denied", f"Cannot access folder: {parent_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to list folders: {str(e)}")
+    
     def _update_nav_buttons(self):
         """Update the state of navigation buttons."""
         # Back button
@@ -760,6 +1101,96 @@ class FileManagerApp:
             messagebox.showinfo("Copy Complete", f"Successfully copied {copied} items to:\n{dest_folder}")
             
         self.status_var.set(f"Copied {copied} items to {dest_folder}")
+    
+    def _bulk_move(self):
+        """Move selected items to another directory."""
+        if not self.selected_items:
+            messagebox.showwarning("No Selection", "Please select items to move.")
+            return
+            
+        dest_folder = filedialog.askdirectory(title="Select Destination Folder")
+        if not dest_folder:
+            return
+        
+        # Separate files and folders
+        files_to_move = []
+        folders_to_move = []
+        for item in self.all_items:
+            if item['path'] in self.selected_items:
+                if item['type'] == 'folder':
+                    folders_to_move.append(item['path'])
+                else:
+                    files_to_move.append(item['path'])
+        
+        msg = f"Move to {dest_folder}:\n"
+        if files_to_move:
+            msg += f"  - {len(files_to_move)} file(s)\n"
+        if folders_to_move:
+            msg += f"  - {len(folders_to_move)} folder(s)\n"
+            
+        if not messagebox.askyesno("Confirm Move", msg):
+            return
+        
+        # Create progress dialog
+        total = len(files_to_move) + len(folders_to_move)
+        progress = ProgressDialog(self.root, "Moving Items", total)
+        
+        moved = 0
+        errors = []
+        
+        # Move files
+        for i, file_path in enumerate(files_to_move, 1):
+            if progress.cancelled:
+                break
+            file_name = os.path.basename(file_path)
+            progress.update(i, f"Moving file: {file_name}")
+            try:
+                dest_path = os.path.join(dest_folder, file_name)
+                
+                # Handle duplicate names
+                if os.path.exists(dest_path):
+                    base, ext = os.path.splitext(file_name)
+                    counter = 1
+                    while os.path.exists(dest_path):
+                        dest_path = os.path.join(dest_folder, f"{base}_{counter}{ext}")
+                        counter += 1
+                        
+                shutil.move(file_path, dest_path)
+                moved += 1
+            except Exception as e:
+                errors.append(f"{os.path.basename(file_path)}: {str(e)}")
+        
+        # Move folders
+        for i, folder_path in enumerate(folders_to_move, 1):
+            if progress.cancelled:
+                break
+            folder_name = os.path.basename(folder_path)
+            progress.update(len(files_to_move) + i, f"Moving folder: {folder_name}")
+            try:
+                dest_path = os.path.join(dest_folder, folder_name)
+                
+                # Handle duplicate names
+                if os.path.exists(dest_path):
+                    counter = 1
+                    while os.path.exists(dest_path):
+                        dest_path = os.path.join(dest_folder, f"{folder_name}_{counter}")
+                        counter += 1
+                        
+                shutil.move(folder_path, dest_path)
+                moved += 1
+            except Exception as e:
+                errors.append(f"{os.path.basename(folder_path)}: {str(e)}")
+        
+        progress.close()
+        self._refresh_files()
+                
+        if errors:
+            messagebox.showwarning("Move Complete", 
+                                   f"Moved {moved} items.\n\nErrors:\n" + "\n".join(errors[:5]))
+        else:
+            messagebox.showinfo("Move Complete", f"Successfully moved {moved} items to:\n{dest_folder}")
+            
+        self.status_var.set(f"Moved {moved} items to {dest_folder}")
 
 
 def main():
