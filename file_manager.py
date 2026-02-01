@@ -10,6 +10,65 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from datetime import datetime
+import threading
+
+
+class ProgressDialog:
+    """Progress bar dialog for bulk operations."""
+    def __init__(self, parent, title, total_items):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.geometry("400x180")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Center the dialog
+        self.dialog.update_idletasks()
+        x = (self.dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (180 // 2)
+        self.dialog.geometry(f"+{x}+{y}")
+        
+        self.total_items = total_items
+        self.current = 0
+        self.cancelled = False
+        
+        # Main frame
+        main_frame = ttk.Frame(self.dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Status label
+        self.status_label = ttk.Label(main_frame, text="Preparing...")
+        self.status_label.pack(pady=(0, 10))
+        
+        # Progress bar
+        self.progress_bar = ttk.Progressbar(main_frame, length=360, mode='determinate', maximum=total_items)
+        self.progress_bar.pack(pady=(0, 10))
+        
+        # Progress text
+        self.progress_label = ttk.Label(main_frame, text="0 / 0")
+        self.progress_label.pack(pady=(0, 10))
+        
+        # Cancel button
+        self.cancel_btn = ttk.Button(main_frame, text="Cancel", command=self._cancel, width=15)
+        self.cancel_btn.pack()
+        
+    def _cancel(self):
+        self.cancelled = True
+        self.cancel_btn.config(state='disabled', text="Cancelling...")
+        
+    def update(self, current, status_text):
+        """Update progress bar and status."""
+        self.current = current
+        self.progress_bar['value'] = current
+        self.status_label.config(text=status_text)
+        self.progress_label.config(text=f"{current} / {self.total_items}")
+        self.dialog.update()
+        
+    def close(self):
+        """Close the progress dialog."""
+        self.dialog.grab_release()
+        self.dialog.destroy()
 
 
 class FileManagerApp:
@@ -487,12 +546,20 @@ class FileManagerApp:
         
         if not messagebox.askyesno("Confirm Delete", msg):
             return
-            
+        
+        # Create progress dialog
+        total = len(files_to_delete) + len(folders_to_delete)
+        progress = ProgressDialog(self.root, "Deleting Items", total)
+        
         deleted = 0
         errors = []
         
         # Delete files first
-        for file_path in files_to_delete:
+        for i, file_path in enumerate(files_to_delete, 1):
+            if progress.cancelled:
+                break
+            progress.update(i + len([f for f in files_to_delete[:i-1] if f in [x[0] for x in errors]]), 
+                          f"Deleting file: {os.path.basename(file_path)}")
             try:
                 os.remove(file_path)
                 deleted += 1
@@ -500,13 +567,18 @@ class FileManagerApp:
                 errors.append(f"{os.path.basename(file_path)}: {str(e)}")
         
         # Delete folders (use shutil.rmtree for non-empty folders)
-        for folder_path in folders_to_delete:
+        for i, folder_path in enumerate(folders_to_delete, 1):
+            if progress.cancelled:
+                break
+            progress.update(len(files_to_delete) + i, 
+                          f"Deleting folder: {os.path.basename(folder_path)}")
             try:
                 shutil.rmtree(folder_path)
                 deleted += 1
             except Exception as e:
                 errors.append(f"{os.path.basename(folder_path)}: {str(e)}")
-                
+        
+        progress.close()
         self._refresh_files()
         
         if errors:
@@ -557,11 +629,17 @@ class FileManagerApp:
         if not messagebox.askyesno("Confirm Rename", 
                                     f"Rename {len(preview_changes)} items?\n\n{preview_text}"):
             return
-            
+        
+        # Create progress dialog
+        progress = ProgressDialog(self.root, "Renaming Items", len(preview_changes))
+        
         renamed = 0
         errors = []
         
-        for item_path, old_name, new_name in preview_changes:
+        for i, (item_path, old_name, new_name) in enumerate(preview_changes, 1):
+            if progress.cancelled:
+                break
+            progress.update(i, f"Renaming: {old_name}")
             try:
                 dir_path = os.path.dirname(item_path)
                 new_path = os.path.join(dir_path, new_name)
@@ -569,7 +647,8 @@ class FileManagerApp:
                 renamed += 1
             except Exception as e:
                 errors.append(f"{old_name}: {str(e)}")
-                
+        
+        progress.close()
         self._refresh_files()
         
         if errors:
@@ -607,14 +686,21 @@ class FileManagerApp:
             
         if not messagebox.askyesno("Confirm Copy", msg):
             return
-            
+        
+        # Create progress dialog
+        total = len(files_to_copy) + len(folders_to_copy)
+        progress = ProgressDialog(self.root, "Copying Items", total)
+        
         copied = 0
         errors = []
         
         # Copy files
-        for file_path in files_to_copy:
+        for i, file_path in enumerate(files_to_copy, 1):
+            if progress.cancelled:
+                break
+            file_name = os.path.basename(file_path)
+            progress.update(i, f"Copying file: {file_name}")
             try:
-                file_name = os.path.basename(file_path)
                 dest_path = os.path.join(dest_folder, file_name)
                 
                 # Handle duplicate names
@@ -631,9 +717,12 @@ class FileManagerApp:
                 errors.append(f"{os.path.basename(file_path)}: {str(e)}")
         
         # Copy folders
-        for folder_path in folders_to_copy:
+        for i, folder_path in enumerate(folders_to_copy, 1):
+            if progress.cancelled:
+                break
+            folder_name = os.path.basename(folder_path)
+            progress.update(len(files_to_copy) + i, f"Copying folder: {folder_name}")
             try:
-                folder_name = os.path.basename(folder_path)
                 dest_path = os.path.join(dest_folder, folder_name)
                 
                 # Handle duplicate names
@@ -647,6 +736,8 @@ class FileManagerApp:
                 copied += 1
             except Exception as e:
                 errors.append(f"{os.path.basename(folder_path)}: {str(e)}")
+        
+        progress.close()
                 
         if errors:
             messagebox.showwarning("Copy Complete", 
