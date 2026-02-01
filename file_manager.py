@@ -83,6 +83,8 @@ class FileManagerApp:
         self.all_items = []  # Now includes both files and folders
         self.filtered_items = []
         self.selected_items = set()
+        self.item_id_to_path = {}  # Map tree item IDs to file paths for faster lookup
+        self.selection_update_pending = None  # For debouncing selection updates
         
         self._setup_styles()
         self._create_ui()
@@ -369,6 +371,7 @@ class FileManagerApp:
         
     def _update_file_list(self):
         self.file_tree.delete(*self.file_tree.get_children())
+        self.item_id_to_path.clear()
         
         for item_info in self.filtered_items:
             type_icon = "📁" if item_info['type'] == 'folder' else "📄"
@@ -381,6 +384,7 @@ class FileManagerApp:
                 item_info['path']
             )
             item_id = self.file_tree.insert('', tk.END, values=values)
+            self.item_id_to_path[item_id] = item_info['path']
             
             if item_info['path'] in self.selected_items:
                 self.file_tree.selection_add(item_id)
@@ -408,10 +412,20 @@ class FileManagerApp:
         self._update_file_list()
         
     def _on_selection_change(self, event):
+        # Debounce selection updates to avoid lag with large selections
+        if self.selection_update_pending:
+            self.root.after_cancel(self.selection_update_pending)
+        self.selection_update_pending = self.root.after(50, self._update_selection)
+    
+    def _update_selection(self):
+        """Update selected items set (debounced)."""
+        self.selection_update_pending = None
         self.selected_items.clear()
+        # Use the cached mapping instead of calling item() for each selection
         for item_id in self.file_tree.selection():
-            values = self.file_tree.item(item_id, 'values')
-            self.selected_items.add(values[4])  # path is index 4 now (after adding type column)
+            path = self.item_id_to_path.get(item_id)
+            if path:
+                self.selected_items.add(path)
         self._update_selection_label()
         
     def _update_selection_label(self):
